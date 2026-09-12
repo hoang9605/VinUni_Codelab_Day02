@@ -1,3 +1,15 @@
+## Team
+
+- Team: Fournity
+- Members: 
+    2A202602853 Hoàng Văn Nam
+    2A202602489 Nguyễn Hải Hoàng
+    2A202602977 Dương Hà Đức Anh
+    2A202603018 Tạ Đăng Dương
+
+---
+
+
 # 02 — Deep-Dive Report
 
 ## Xanh SM: Dispatcher Co-pilot cho sự cố pin yếu
