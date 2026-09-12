@@ -1,7 +1,13 @@
-# 03 — AI Interaction Log
+## Team
 
-**Họ tên:** Nguyễn Hải Hoàng
-**Email/MSSV:** 2A202602489
+- Team: Fournity
+- Members: 
+    2A202602853 Hoàng Văn Nam
+    2A202602489 Nguyễn Hải Hoàng
+    2A202602977 Dương Hà Đức Anh
+    2A202603018 Tạ Đăng Dương
+
+---
 
 ## 1. AI đã giúp gì?
 - Cấu trúc hóa quy trình theo đúng format Problem Statement 6-field / Quick

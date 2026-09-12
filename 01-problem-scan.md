@@ -1,10 +1,11 @@
-# 01 — Problem Scan (Cá nhân & Nhóm)
+## Team
 
-**Tên nhóm:** []
-**Thành viên:**
-- [Nguyễn Hải Hoàng] — [2A202602489]
-- [Họ tên] — [email]
-- [Họ tên] — [email]
+- Team: Fournity
+- Members: 
+    2A202602853 Hoàng Văn Nam
+    2A202602489 Nguyễn Hải Hoàng
+    2A202602977 Dương Hà Đức Anh
+    2A202603018 Tạ Đăng Dương
 
 ---
 
