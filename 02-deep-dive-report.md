@@ -1,197 +1,254 @@
 ## Team
 
-- Team: Fournity
-- Members: 
-    2A202602853 Hoàng Văn Nam
-    2A202602489 Nguyễn Hải Hoàng
-    2A202602977 Dương Hà Đức Anh
-    2A202603018 Tạ Đăng Dương
+- **Team:** Fournity
+- **Members:**
+  - 2A202602853 — Hoàng Văn Nam
+  - 2A202602489 — Nguyễn Hải Hoàng
+  - 2A202602977 — Dương Hà Đức Anh
+  - 2A202603018 — Tạ Đăng Dương
 
 ---
 
+**Bài toán được chọn (từ `01-problem-scan.md`):** Card #1 — **Vinmec: Chuẩn hóa chẩn đoán sang mã ICD-10**
 
-# 02 — Deep-Dive Report
-
-## Xanh SM: Dispatcher Co-pilot cho sự cố pin yếu
-
-**Phạm vi quyết định:** Prototype hỗ trợ điều phối, không phải hệ thống tự trị.  
-**Chủ sở hữu nghiệp vụ giả định:** Trung tâm Điều vận Xanh SM.  
-**Trạng thái số liệu:** Baseline và volume trong báo cáo là giả định cần xác minh bằng log vận hành đã ẩn danh.
+> **Lưu ý về dữ liệu:** Các số liệu về khối lượng hồ sơ, thời gian xử lý và tỷ lệ sai mã trong báo cáo là giả định phục vụ scoping. Nhóm cần xác minh bằng log đã ẩn danh và khảo sát thực tế trước khi kết luận ROI. “Có dữ liệu” trong phạm vi prototype nghĩa là có danh mục ICD-10 chính thức và bộ dữ liệu mẫu được phê duyệt quyền sử dụng; không mặc định rằng dữ liệu bệnh nhân thật đã sẵn sàng.
 
 ---
 
-# 1. Current-State Workflow
+# 🏗️ Phase 3 — DEEP-DIVE
 
-## 1.1. Mô tả quy trình hiện tại
+## 3.1. Current-State Workflow
 
-Khi tài xế báo xe có mức pin thấp, điều phối viên phải ghép thông tin từ cuộc gọi, dashboard phương tiện, bản đồ và danh sách trạm sạc. Phần tra cứu/chọn phương án và soạn hướng dẫn là bottleneck chính.
+### Mô tả quy trình
 
-| Bước | Actor / hệ thống | Input | Hoạt động | Output | Thời gian giả định |
-|---:|---|---|---|---|---:|
-| 1 | Tài xế | Mức pin, vị trí, mô tả | Gọi/gửi yêu cầu hỗ trợ | Ticket sự cố | 2 phút |
-| 2 | Điều phối viên + dashboard xe | Biển số/tài khoản xe | Xác minh vị trí, mức pin, dòng xe và cổng sạc | Hồ sơ tình huống | 2 phút |
-| 3 | Điều phối viên + dashboard trạm | Vị trí, cổng sạc | Tìm trạm còn chỗ, tương thích và trong khoảng cách an toàn | Danh sách ứng viên | 5 phút 🔴 |
-| 4 | Điều phối viên | Hồ sơ + danh sách ứng viên | Chọn phương án, viết hướng dẫn hoặc xác định cần cứu hộ | Nội dung hướng dẫn nháp | 5 phút 🔴 |
-| 5 | Điều phối viên | Phương án đã kiểm tra | Gửi tài xế hoặc liên hệ đội cứu hộ | Hướng dẫn/lệnh nghiệp vụ | 1 phút |
+```text
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│ Bước 1       │     │ Bước 2       │     │ Bước 3       │     │ Bước 4       │
+│ Bác sĩ ghi   │     │ Coder đọc    │     │ Coder tra    │     │ Nhập mã vào  │
+│ chẩn đoán    │ ──→ │ free-text    │ ──→ │ cứu danh mục │ ──→ │ hệ thống BHYT│
+│ (free-text)  │     │ chẩn đoán    │     │ ICD-10 🔴    │     │              │
+│ Ai: Bác sĩ   │     │ Ai: Coder    │     │ Ai: Coder    │     │ Ai: Coder    │
+│ ⏱ 1 phút     │     │ ⏱ 1 phút     │     │ ⏱ 5 phút 🔴  │     │ ⏱ 1 phút     │
+│ In: Kết quả  │     │ In: Hồ sơ    │     │ In: Tên bệnh │     │ In: Mã ICD-10│
+│ Out: Hồ sơ   │     │ Out: Khái niệm│    │ Out: Mã ứng  │     │ Out: Claim   │
+│ chẩn đoán    │     │ bệnh cần mã  │     │ viên         │     │ BHYT         │
+└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+                                                                      │
+                                                                      ▼
+                                                               ┌──────────────┐
+                                                               │ Bước 5 🔄    │
+                                                               │ Handoff:     │
+                                                               │ Coder → BHYT │
+                                                               │ Nếu bị từ   │
+                                                               │ chối: tra và│
+                                                               │ sửa lại 🔴  │
+                                                               │ ⏱ 10–15 phút│
+                                                               └──────────────┘
 
-**Tổng thời gian baseline giả định:** 15 phút/lượt.  
-**Bottleneck:** Bước 3 và 4, chiếm khoảng 10 phút/lượt.  
-**Handoff:** Tài xế → tổng đài/điều phối viên → dashboard xe → dashboard trạm sạc → điều phối viên → tài xế hoặc đội cứu hộ.
-
-## 1.2. Điểm lỗi tiềm năng
-
-- Mức pin hoặc vị trí được nghe/nhập sai từ cuộc gọi.
-- Trạm gần nhất không tương thích cổng sạc hoặc vừa hết chỗ.
-- Điều phối viên chuyển đổi giữa nhiều màn hình nên bỏ sót điều kiện.
-- Tin nhắn viết gấp thiếu địa chỉ, cảnh báo hoặc chỉ dẫn rõ ràng.
-- Áp lực của người dùng có thể khiến quy trình an toàn bị bỏ qua.
+🔴 = Bottleneck   🔄 = Handoff (Medical coder ↔ Hệ thống BHYT)
+⏱ Tổng thời gian thủ công giả định: khoảng 8 phút/hồ sơ,
+  chưa tính 10–15 phút làm lại nếu claim bị từ chối vì mã không phù hợp.
+```
 
 Sơ đồ trực quan được nộp tại `04-workflow-diagram.png`.
 
+### Bảng phân tích từng bước
+
+| Bước | Actor / hệ thống | Input | Hoạt động | Output | Thời gian giả định |
+|---:|---|---|---|---|---:|
+| 1 | Bác sĩ | Kết quả khám và bằng chứng lâm sàng | Ghi chẩn đoán dạng free-text vào hồ sơ | Chẩn đoán đã ghi nhận | 1 phút |
+| 2 | Medical coder | Hồ sơ chẩn đoán | Đọc, chuẩn hóa viết tắt/chính tả và xác định khái niệm cần mã hóa | Tên bệnh/khái niệm chuẩn hóa sơ bộ | 1 phút |
+| 3 | Medical coder + danh mục ICD-10 | Tên bệnh, thông tin ngữ cảnh | Tra cứu danh mục và đối chiếu các mã gần giống | Mã ICD-10 ứng viên | 5 phút 🔴 |
+| 4 | Medical coder + hệ thống nghiệp vụ | Mã ứng viên | Chọn mã cuối, nhập và kiểm tra claim | Claim sẵn sàng gửi | 1 phút |
+| 5 | Hệ thống BHYT + medical coder | Claim | Tiếp nhận; nếu từ chối thì trả lý do để coder tra và sửa | Claim chấp nhận hoặc yêu cầu sửa | 10–15 phút nếu làm lại 🔴 |
+
+### Handoff và bottleneck
+
+- **Handoff 1:** Bác sĩ → medical coder qua hồ sơ bệnh án.
+- **Handoff 2:** Medical coder → hệ thống BHYT qua claim.
+- **Handoff ngược:** BHYT → medical coder khi claim bị từ chối.
+- **Bottleneck chính:** Bước 3 vì free-text có viết tắt, lỗi chính tả, từ đồng nghĩa và các mã ICD-10 gần nhau.
+- **Bottleneck thứ cấp:** Rework tại bước 5 khi mã không đủ đặc hiệu hoặc không phù hợp ngữ cảnh được ghi nhận.
+
+### Điểm lỗi tiềm năng
+
+1. Chẩn đoán quá chung chung hoặc thiếu bằng chứng để chọn mã đủ đặc hiệu.
+2. Viết tắt có nhiều nghĩa và khác nhau giữa chuyên khoa.
+3. Nhầm mã bệnh gần giống, mã biến chứng hoặc mã nguyên nhân bên ngoài.
+4. Dùng sai phiên bản/danh mục mã đang có hiệu lực.
+5. AI hoặc coder suy diễn thêm chẩn đoán không có trong hồ sơ.
+6. Dữ liệu nhạy cảm bị đưa ra ngoài phạm vi hệ thống được phê duyệt.
+
 ---
 
-# 2. Problem Statement — 6 Fields
+## 3.2. Problem Statement (6-field)
 
 | Field | Nội dung |
 |---|---|
-| **1. Actor / Operator** | Điều phối viên tại trung tâm vận hành Xanh SM là operator chính. Tài xế là người báo sự cố và nhận hướng dẫn; đội cứu hộ là downstream actor khi cần. |
-| **2. Current Workflow** | Điều phối viên tiếp nhận yêu cầu, xác minh xe/vị trí/pin, mở dashboard trạm để lọc trạm tương thích, chọn phương án, soạn tin và gửi hoặc liên hệ cứu hộ. Quy trình khoảng 5 bước, baseline giả định 15 phút/lượt và phụ thuộc nhiều thao tác thủ công. |
-| **3. Bottleneck** | Bước tra trạm và soạn phương án mất khoảng 10 phút/lượt vì dữ liệu nằm ở nhiều nguồn, cần kiểm tra khoảng cách/cổng sạc và chuyển dữ liệu thô thành hướng dẫn dễ hiểu. |
-| **4. Business Impact** | Nếu giả định có 40 lượt cần hỗ trợ/ngày, 15 phút/lượt tương đương 10 giờ xử lý/ngày. Chờ lâu làm tăng thời gian xe không phục vụ khách và rủi ro cạn pin. Volume và tác động doanh thu phải được đo lại bằng log thật trước business case. |
-| **5. Success Metric** | (a) Giảm median handling time từ baseline 15 phút xuống ≤ 4 phút; (b) ≥ 98% đề xuất vượt qua rule về mức pin, khoảng cách và cổng sạc; (c) 100% nội dung gửi tài xế và lệnh cứu hộ có người duyệt; (d) 100% trường hợp pin < 5% không được đề xuất trạm > 5 km; (e) tỷ lệ fallback/escalation được ghi log để phân tích. |
-| **6. Operational Boundary** | AI được đọc dữ liệu cần thiết đã phân quyền, tóm tắt và tạo đề xuất nháp. AI không được tự gửi tin, tự điều cứu hộ, sửa dữ liệu nguồn, bỏ qua rule hoặc khẳng định hành động đã xảy ra. Điều phối viên duyệt mọi hành động. Thiếu hoặc mâu thuẫn dữ liệu phải fallback. |
+| **1. Actor / Operator** | Nhân viên hành chính y tế/medical coder tại cơ sở Vinmec là operator chính. Bác sĩ là người tạo chẩn đoán nguồn; bộ phận thanh toán và hệ thống BHYT là downstream stakeholders. |
+| **2. Current Workflow** | Bác sĩ ghi chẩn đoán tự do → coder đọc và chuẩn hóa nội dung → tra cứu thủ công danh mục ICD-10 đang áp dụng → chọn và nhập mã vào hệ thống nghiệp vụ → claim được chuyển sang BHYT; nếu bị từ chối vì mã, coder phải đọc lý do và làm lại. Quy trình cơ sở giả định mất khoảng 8 phút/hồ sơ. |
+| **3. Bottleneck** | Bước tra cứu thủ công mất khoảng 5 phút: coder phải đối chiếu free-text có nhiều biến thể, viết tắt và lỗi chính tả với danh mục ICD-10 lớn; các mã gần giống đòi hỏi kiểm tra ngữ cảnh và độ đặc hiệu. |
+| **4. Business Impact** | Với giả định khoảng 200 hồ sơ/ngày/cơ sở và tỷ lệ lỗi coding 10–15%, rework 10–15 phút/hồ sơ có thể gây chậm xử lý claim và tăng tải hành chính. Đây là giả thuyết cần xác minh bằng rejection reason, coding time và claim logs đã ẩn danh; không coi là số liệu chính thức của Vinmec/BHYT. |
+| **5. Success Metric** | (a) Giảm median search time từ baseline 5 phút xuống dưới 30 giây/hồ sơ; (b) top-3 recall ≥ 95% và top-1 accuracy ≥ 90% trên golden set có chuyên gia xác nhận; (c) 100% mã cuối do coder duyệt; (d) 100% trường hợp confidence < 70%, thiếu ngữ cảnh hoặc có mâu thuẫn được gắn cờ review; (e) không tăng tỷ lệ claim bị từ chối liên quan tới coding so với baseline. |
+| **6. Operational Boundary** | AI được trích xuất cụm chẩn đoán từ free-text và đề xuất tối đa top-3 mã từ danh mục ICD-10 đã phê duyệt, kèm confidence và bằng chứng văn bản. **CẤM:** tự chẩn đoán, thêm bệnh không có trong hồ sơ, tự ghi mã cuối, tự gửi claim BHYT hoặc thay đổi hồ sơ nguồn. Medical coder bắt buộc duyệt; confidence < 70%, dữ liệu thiếu/mâu thuẫn hoặc không có mã phù hợp phải chuyển tra cứu thủ công. |
 
-## 2.1. Scope và ngoài scope
+### Phạm vi prototype
 
-### Trong scope prototype
+**Trong scope:**
 
-- Input giả lập: mức pin, vị trí, dòng xe, khoảng cách và trạng thái trạm.
-- Rule kiểm tra ngưỡng an toàn trước/sau lời gọi LLM.
-- LLM tạo JSON và nội dung `[DRAFT_ONLY]`.
-- Điều phối viên xem, sửa, duyệt hoặc từ chối.
-- Log input đã ẩn danh, rule result, output và quyết định của người duyệt.
+- Văn bản chẩn đoán tiếng Việt đã loại bỏ/giả lập định danh.
+- Một phiên bản danh mục ICD-10 được kiểm soát và ghi rõ ngày hiệu lực.
+- Trích xuất cụm chẩn đoán, tìm kiếm semantic/fuzzy và xếp hạng top-3.
+- Hiển thị mã, tên mã chính thức, confidence, đoạn bằng chứng và cảnh báo.
+- Coder chấp nhận, sửa hoặc từ chối đề xuất; mọi quyết định được audit.
 
-### Ngoài scope
+**Ngoài scope:**
 
-- Tự động điều xe cứu hộ hoặc tự gửi nội dung cho tài xế.
-- Điều khiển phương tiện, chẩn đoán lỗi pin hoặc dự đoán quãng đường chính xác.
-- Thay đổi trạng thái trạm sạc và booking chỗ thật.
-- Dùng dữ liệu vị trí/cá nhân ngoài mục đích xử lý ticket.
+- Chẩn đoán bệnh, tư vấn điều trị hoặc thay thế quyết định của bác sĩ.
+- Tự động ghi mã vào hồ sơ hoặc tự gửi claim.
+- Học trực tiếp từ dữ liệu mới mà chưa kiểm duyệt.
+- Dùng thông tin bệnh nhân ngoài mục đích coding được phê duyệt.
+- Mã hóa toàn bộ chuyên khoa ngay từ vòng prototype đầu tiên.
 
 ---
 
-# 3. AI Fit
+## 3.3. Future-State Flow & AI Fit
 
-## 3.1. So sánh phương án
+### AI Fit
 
-| Phương án | Phù hợp ở đâu | Hạn chế | Quyết định |
+Chọn **LLM Feature kết hợp retrieval/ranking xác định**, không dùng LLM sinh mã tự do.
+
+| Phương án | Điểm mạnh | Hạn chế | Vai trò trong giải pháp |
 |---|---|---|---|
-| **No AI / thủ công** | Dễ kiểm soát, là fallback bắt buộc | Chậm và phụ thuộc thao tác nhiều màn hình | Giữ làm fallback |
-| **Rule / state machine** | Pin `< 5%`, khoảng cách `> 5 km`, cổng sạc, trường bắt buộc và quyền hành động | Không giỏi soạn/tóm tắt ngôn ngữ tự nhiên | Bắt buộc cho safety-critical logic |
-| **LLM Feature** | Tóm tắt tình huống, giải thích lựa chọn và soạn tin nhắn rõ ràng | Có thể hallucinate hoặc không tuân thủ format | Chọn, nhưng đặt sau rule và trước HITL |
-| **Agentic Loop** | Có thể tự gọi nhiều tool và thực hiện workflow | Quyền tự trị làm tăng rủi ro vận hành, khó audit | Không chọn trong scope này |
+| **Rule-based thuần** | Dễ audit, tốt với từ điển và mapping chính xác | Khó bao phủ viết tắt, lỗi chính tả và cách diễn đạt đa dạng | Chuẩn hóa cơ bản, validation và enforcement boundary |
+| **Fuzzy/Semantic Retrieval** | Chỉ tìm trong danh mục hợp lệ, hỗ trợ biến thể ngôn ngữ | Cần corpus và cách đánh giá ranking | Sinh danh sách mã ứng viên |
+| **LLM Feature** | Trích xuất khái niệm, hiểu ngữ cảnh free-text và giải thích đề xuất | Có thể suy diễn/hallucinate | NER, chuẩn hóa ngôn ngữ và rerank có kiểm soát |
+| **Agentic Loop** | Có thể tự gọi nhiều công cụ | Không cần thiết, tăng quyền và rủi ro trong workflow cố định | Không chọn |
 
-**Kết luận AI Fit:** Chọn **Rule + LLM Feature + Human-in-the-loop**. Không giao quy tắc định lượng cho prompt; Python kiểm tra điều kiện an toàn một cách xác định. LLM là co-pilot, không phải decision maker.
+Không chọn Rule-based thuần vì ngôn ngữ chẩn đoán có nhiều biến thể. Không để LLM tự tạo mã vì có nguy cơ hallucination. Danh sách ứng viên phải được truy hồi từ danh mục ICD-10 đã phê duyệt và mã cuối luôn do coder quyết định.
 
----
-
-# 4. Future-State Flow
+### Future-State Flow
 
 ```text
-Tài xế gửi yêu cầu
-        │
-        ▼
-[Validate trường bắt buộc & quyền truy cập]
-        │ thiếu/sai ────────────────► ↩️ Fallback: điều phối nhập/xác minh lại
-        ▼
-[RULE: pin, khoảng cách, cổng sạc]
-        │
-        ├── pin < 5% và trạm > 5 km ─► action=dispatch_mobile_charger
-        │
-        └── đủ điều kiện ────────────► action=recommend_station
-                                             │
-                                             ▼
-                              🔵 LLM tạo JSON + [DRAFT_ONLY]
-                                             │
-                                             ▼
-                                 [Post-validation bằng code]
-                                    │ lỗi format/boundary
-                                    └────────► ↩️ Fallback / escalation
-                                             │ hợp lệ
-                                             ▼
-                                  🟢 Điều phối viên review
-                                    │ từ chối/sửa  │ duyệt
-                                    ▼             ▼
-                              Xử lý thủ công   Hệ thống nghiệp vụ gửi/
-                                              tạo yêu cầu cứu hộ
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│ Bước 1       │     │ 🔵 AI trích  │     │ 🔵 Retrieval │     │ 🟢 Coder     │
+│ Bác sĩ ghi   │ ──→ │ xuất & chuẩn │ ──→ │ + AI rerank  │ ──→ │ review top-3 │
+│ chẩn đoán    │     │ hóa khái niệm│     │ mã + score   │     │ và chọn mã   │
+└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+                                                                      │
+                                      ┌───────────────────────────────┤
+                                      │                               ▼
+                                      │                        [Validate mã/version]
+                                      │                               │
+                                      │                               ▼
+                                      │                        [Coder xác nhận ghi mã]
+                                      │
+                                      ▼
+                               ↩️ FALLBACK
+                     Confidence < 70%, thiếu/mâu thuẫn dữ liệu,
+                     không tìm được mã hoặc coder từ chối:
+                     quay lại tra cứu thủ công và/hoặc yêu cầu
+                     bác sĩ làm rõ — không tự suy diễn chẩn đoán.
 ```
 
-## 4.1. Human-in-the-loop
+### Structured output đề xuất
 
-Điều phối viên phải:
+```json
+{
+  "extracted_diagnosis": "viêm phổi cộng đồng",
+  "candidates": [
+    {
+      "code": "<mã lấy từ danh mục được phê duyệt>",
+      "official_label": "<tên mã chính thức>",
+      "confidence": 0.86,
+      "evidence": "<đoạn văn bản nguồn hỗ trợ đề xuất>"
+    }
+  ],
+  "requires_human_review": true,
+  "warning": "Đây là đề xuất coding, không phải chẩn đoán y khoa."
+}
+```
 
-1. Xác nhận dữ liệu xe và mức pin.
-2. Kiểm tra trạm/cứu hộ được đề xuất.
-3. Sửa hoặc từ chối nội dung nếu cần.
-4. Chủ động bấm duyệt trước khi hệ thống nghiệp vụ thực hiện hành động.
+### Human-in-the-loop
 
-Giao diện không được biến `[DRAFT_ONLY]` thành hành động gửi tự động. Backend phải kiểm tra quyền và trạng thái approval thay vì tin vào văn bản do LLM tạo.
+Medical coder phải:
 
-## 4.2. Fallback
+1. Kiểm tra cụm chẩn đoán được trích xuất có đúng hồ sơ nguồn không.
+2. Kiểm tra mã và tên mã trong danh mục đúng phiên bản.
+3. Xác định mức độ đặc hiệu phù hợp với bằng chứng đã ghi nhận.
+4. Chấp nhận, sửa hoặc từ chối đề xuất.
+5. Xác nhận trước khi mã được ghi vào hệ thống nghiệp vụ.
+
+Nếu chẩn đoán nguồn chưa đủ rõ, coder không được dùng AI để suy diễn mà phải yêu cầu bác sĩ làm rõ theo quy trình nghiệp vụ.
+
+### Fallback
 
 | Tình huống | Hành vi fallback |
 |---|---|
-| Thiếu pin, vị trí, dòng xe hoặc loại cổng | Không gọi LLM; yêu cầu xác minh hoặc xử lý thủ công. |
-| API xe/trạm lỗi hoặc dữ liệu quá cũ | Hiển thị dữ liệu không khả dụng; quay về dashboard và quy trình cũ. |
-| Không có trạm tương thích/an toàn | Đề xuất escalation; điều phối viên quyết định cứu hộ. |
-| Gemini timeout/lỗi | Không retry vô hạn; tối đa một lần rồi chuyển thủ công. |
-| Output sai JSON hoặc vi phạm boundary | Chặn output, ghi log lỗi và chuyển điều phối viên. |
-| Người dùng cố prompt-inject | System instruction + deterministic guardrail vẫn được ưu tiên; không thực hiện hành động. |
+| Confidence cao nhất < 70% | Không preselect mã; gắn cờ và mở công cụ tra cứu thủ công. |
+| Thiếu ngữ cảnh hoặc các đoạn hồ sơ mâu thuẫn | Chuyển coder review; nếu cần, yêu cầu bác sĩ làm rõ. |
+| Không có ứng viên trong danh mục | Không để model tạo mã mới; tra cứu thủ công. |
+| Danh mục sai version/hết hiệu lực | Chặn đề xuất và yêu cầu quản trị cập nhật nguồn mã. |
+| Model/API timeout hoặc lỗi | Giữ workflow thủ công; không retry vô hạn. |
+| Output không đúng schema/mã không nằm trong danh mục | Chặn output, ghi log kỹ thuật và chuyển review. |
+| Coder từ chối đề xuất | Ghi lý do để đánh giá; không tự động học từ một phản hồi đơn lẻ. |
 
 ---
 
-# 5. Risk, Data và Measurement Plan
+## 3.4. Data, Privacy, Risk & Measurement Plan
 
-## 5.1. Rủi ro chính và kiểm soát
+### Dữ liệu cần thiết
+
+1. Danh mục ICD-10 chính thức/phiên bản đang được nghiệp vụ áp dụng.
+2. Bộ ánh xạ chẩn đoán free-text → mã đã được coder xác nhận.
+3. Các biến thể viết tắt/chính tả có kiểm duyệt.
+4. Claim rejection reasons liên quan tới coding để thiết lập baseline.
+5. Dữ liệu phải được tối thiểu hóa, ẩn danh/giả lập và phê duyệt quyền sử dụng.
+
+### Rủi ro và kiểm soát
 
 | Rủi ro | Mức độ | Kiểm soát |
 |---|---|---|
-| Đề xuất trạm không an toàn | Cao | Rule trước/sau LLM, dữ liệu trạm thời gian thực, HITL |
-| AI tuyên bố đã gửi/đã điều xe | Cao | Không cấp tool thực thi; schema chỉ là proposal; approval ở backend |
-| Dữ liệu vị trí/cá nhân bị lộ | Cao | Data minimization, RBAC, mã hóa, retention ngắn, log đã che định danh |
-| Hallucination địa chỉ/trạng thái trạm | Cao | Chỉ cho phép chọn ID từ API; post-validation; không cho model tự tạo trạm |
-| Automation bias | Trung bình | Hiển thị lý do/rule, cho phép từ chối, audit tỷ lệ override |
+| Đề xuất mã sai hoặc thiếu đặc hiệu | Cao | Top-3, evidence, confidence, danh mục đóng và coder duyệt |
+| LLM tạo mã không tồn tại | Cao | Retrieval-only candidates + kiểm tra mã bằng code |
+| AI suy diễn thành chẩn đoán mới | Cao | Prompt boundary, chỉ trích xuất từ source, evidence bắt buộc và HITL |
+| Lộ dữ liệu sức khỏe cá nhân | Cao | Data minimization, de-identification, RBAC, encryption và audit log |
+| Automation bias của coder | Trung bình | Không preselect dưới ngưỡng, hiển thị evidence, theo dõi override/error |
+| Dataset lệch chuyên khoa | Trung bình | Đánh giá riêng theo chuyên khoa, giới hạn scope pilot |
 
-## 5.2. Kế hoạch xác minh metric
+### Kế hoạch đo lường
 
-1. Lấy mẫu ticket đã ẩn danh trong một khoảng thời gian được phê duyệt.
-2. Đo median/P90 handling time và tỷ lệ escalation của quy trình hiện tại.
-3. Xây golden set có phương án được chuyên gia vận hành xác nhận.
-4. Chạy offline evaluation cho rule và output schema.
-5. Chạy **shadow mode**: co-pilot tạo đề xuất nhưng không tác động workflow thật.
-6. So sánh thời gian, lỗi safety, acceptance/override và phản hồi điều phối viên.
+1. Chọn một chuyên khoa/phạm vi mã hẹp cho prototype.
+2. Tạo golden set đã loại định danh, được ít nhất hai coder review và xử lý bất đồng.
+3. Đo baseline: median/P90 search time, top coding errors và rejection rate.
+4. Chạy offline: top-1 accuracy, top-3 recall, coverage, calibration theo confidence.
+5. Chạy shadow mode: AI đề xuất nhưng coder vẫn làm theo quy trình hiện tại.
+6. Chạy pilot có giám sát và so sánh time, acceptance/override, safety errors và claim rejection.
 
 ---
 
-# 6. AI Readiness Evaluation
+# 🏁 Phase 5 — EVALUATE
 
-| Checklist | Trạng thái | Bằng chứng / khoảng trống |
-|---|---|---|
-| Có dữ liệu mẫu/log sạch để test? | ❌ Chưa | Repository chỉ có tình huống giả lập; chưa có log vận hành đã ẩn danh và golden labels. |
-| Rủi ro khi AI sai kiểm soát được qua HITL/fallback? | ✅ Có điều kiện | Thiết kế có rule, post-validation, không cấp quyền hành động, HITL và fallback; vẫn cần security review. |
-| Stakeholder sẵn sàng đổi quy trình? | ❌ Chưa xác minh | Chưa có phỏng vấn/usability test với điều phối viên và chủ hệ thống. |
+## AI Readiness Checklist
 
-## Quyết định: **NOT YET**
+- [x] **Có nguồn dữ liệu để bắt đầu prototype?** — Có điều kiện: danh mục ICD-10 chính thức và dataset chẩn đoán tiếng Việt **chỉ được dùng sau khi xác minh license, phiên bản, chất lượng và phê duyệt privacy**. Dữ liệu công khai không tự động đồng nghĩa với dữ liệu phù hợp cho Vinmec.
+- [x] **Rủi ro khi AI sai có thể kiểm soát?** — Có cho prototype scope hẹp: model chỉ đề xuất top-3; mã phải thuộc danh mục đóng; confidence dưới 70% fallback; coder luôn duyệt mã cuối. Việc kiểm soát phải được chứng minh qua golden set, không chỉ dựa trên thiết kế.
+- [x] **Thay đổi workflow có khả thi?** — Giả thuyết khả thi vì coder chuyển từ “tự tra cứu toàn bộ” sang “review đề xuất”, nhưng vẫn cần phỏng vấn và usability test trước pilot để xác nhận stakeholder readiness.
 
-Không GO production ở thời điểm hiện tại. Bài toán đủ rõ để tiếp tục một prototype offline, nhưng chưa có bằng chứng dữ liệu và stakeholder readiness. Các con số đang là giả định nên chưa thể chứng minh ROI hoặc safety performance.
+## Quyết định cuối cùng: **GO — Prototype scope hẹp, có điều kiện**
 
-### Điều kiện để chuyển sang GO cho pilot scope hẹp
+Nhóm không phê duyệt triển khai production hoặc tự động gửi claim. Quyết định GO chỉ dành cho prototype offline/shadow mode trong một phạm vi chuyên khoa nhỏ.
 
-1. Có dataset đã ẩn danh và được phê duyệt sử dụng.
-2. Xác lập baseline median/P90 handling time và error taxonomy.
-3. Rule engine đạt 100% trên bộ boundary tests bắt buộc.
-4. Golden-set evaluation đạt ≥ 98% safety-rule compliance.
-5. Security/privacy review thông qua.
-6. Điều phối viên thử nghiệm shadow mode và chấp thuận workflow.
+### Justification
 
-Ngay cả khi đạt các điều kiện trên, quyết định GO chỉ dành cho **pilot có giám sát**, không phải tự động hóa hoàn toàn.
+> Bài toán có đầu vào, operator và bottleneck rõ: chuẩn hóa free-text chẩn đoán thành danh sách mã ICD-10 ứng viên. Danh mục mã là tập đóng nên có thể ngăn LLM tạo mã tự do; semantic retrieval và LLM hỗ trợ xử lý biến thể ngôn ngữ tốt hơn rule thuần. Rủi ro được giới hạn bằng top-3 recommendation, confidence threshold 70%, evidence từ hồ sơ nguồn, validation theo danh mục và bắt buộc medical coder duyệt trước khi ghi mã. Các metric về thời gian, top-1 accuracy, top-3 recall và claim rejection cho phép đánh giá rõ ràng. Tuy nhiên, dữ liệu và số liệu business hiện vẫn cần xác minh, nên GO chỉ áp dụng cho prototype có kiểm soát, chưa áp dụng cho production.
+
+### Exit criteria trước khi pilot
+
+1. Xác minh license và phiên bản danh mục/dataset.
+2. Privacy/security review thông qua.
+3. Golden set đạt top-3 recall ≥ 95% và top-1 accuracy ≥ 90%.
+4. 100% output chỉ chứa mã tồn tại trong danh mục được phê duyệt.
+5. 100% hồ sơ có coder xác nhận mã cuối.
+6. Không tăng coding-related claim rejection so với baseline trong shadow test.
+7. Medical coder xác nhận giao diện và workflow có thể sử dụng.
