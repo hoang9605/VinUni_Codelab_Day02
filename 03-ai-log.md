@@ -1,3 +1,6 @@
+Team: Fournity
+Members: 2A202602977 Dương Hà Đức Anh
+
 # 03 — AI Log & Reflection
 
 ## 1. Bối cảnh và mục tiêu

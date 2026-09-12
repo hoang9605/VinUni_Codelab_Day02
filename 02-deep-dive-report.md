@@ -1,3 +1,6 @@
+Team: Fournity
+Members: 2A202602977 Dương Hà Đức Anh
+
 # 02 — Deep-Dive Report: Xanh SM Critical EV Support
 
 ## 1. Executive Summary

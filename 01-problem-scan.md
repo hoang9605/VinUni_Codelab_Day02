@@ -1,3 +1,6 @@
+Team: Fournity
+Members: 2A202602977 Dương Hà Đức Anh
+
 # 01 — Problem Scan & Quick Problem Cards
 
 ## Bối cảnh lựa chọn
