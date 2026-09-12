@@ -1,6 +1,17 @@
+## Team
+
+- Team: Fournity
+- Members: 
+    2A202602853 Hoàng Văn Nam
+    2A202602489 Nguyễn Hải Hoàng
+    2A202602977 Dương Hà Đức Anh
+    2A202603018 Tạ Đăng Dương
+
+---
+
+
 # 01 — Problem Scan & Quick Problem Cards
 
-**Học viên:** Nam (branch `namhv521`)  
 **Vai trò giả lập:** AI Product Engineer, Vin Smart Future  
 **Phạm vi:** Tìm bài toán vận hành có thể thử nghiệm bằng AI trong các công ty thành viên Vingroup.
 
